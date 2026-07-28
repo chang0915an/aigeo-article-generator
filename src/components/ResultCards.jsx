@@ -31,6 +31,34 @@ export default function ResultCards({ data }) {
     URL.revokeObjectURL(url);
   };
 
+  // Helper to split article into clean spaced paragraphs
+  const renderFormattedArticle = (text) => {
+    if (!text) return null;
+    // Split by newlines and filter out empty strings while preserving paragraph blocks
+    const paragraphs = text.split(/\n\s*\n/).filter(p => p.trim() !== '');
+
+    return (
+      <div className="space-y-4 text-slate-100 text-sm leading-relaxed">
+        {paragraphs.map((para, idx) => {
+          const trimmed = para.trim();
+          // Title / Header detection
+          if (trimmed.startsWith('#') || trimmed.startsWith('【') || idx === 0) {
+            return (
+              <div key={idx} className="font-bold text-slate-50 text-base border-l-2 border-cyan-400 pl-3 my-3">
+                {trimmed}
+              </div>
+            );
+          }
+          return (
+            <p key={idx} className="text-slate-200 leading-relaxed text-sm bg-slate-900/40 p-3 rounded-lg border border-slate-800/40">
+              {trimmed}
+            </p>
+          );
+        })}
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-6 animate-fadeIn">
       {/* 模块 1 & 模块 2 双列视图 */}
@@ -100,7 +128,7 @@ export default function ResultCards({ data }) {
           </div>
         ) : (
           <div className="bg-slate-900/80 rounded-xl p-4 text-xs text-slate-400 italic">
-            豆包联网搜索未提供具体的外部链接引用，已自动整合综合检索数据。
+            豆包联网搜索整合数据。
           </div>
         )}
       </div>
@@ -160,9 +188,9 @@ export default function ResultCards({ data }) {
           </div>
         )}
 
-        {/* 成品内容区 */}
-        <div className="bg-slate-950 rounded-xl p-5 border border-slate-800/90 text-slate-100 text-sm leading-relaxed whitespace-pre-wrap select-text">
-          {finalArticle}
+        {/* 成品内容区：层次分明的排版卡片 */}
+        <div className="bg-slate-950 rounded-xl p-5 border border-slate-800/90 select-text">
+          {renderFormattedArticle(finalArticle)}
         </div>
       </div>
     </div>
