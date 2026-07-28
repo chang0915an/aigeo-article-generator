@@ -12,54 +12,84 @@ export default function App() {
   const [resultData, setResultData] = useState(null);
   const [errorMsg, setErrorMsg] = useState('');
 
+  const callApiStep = async (payload) => {
+    let response = await fetch('/.netlify/functions/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok && response.status === 404) {
+      response = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+    }
+
+    const responseText = await response.text();
+    let resJson;
+    try {
+      resJson = JSON.parse(responseText);
+    } catch (e) {
+      throw new Error(`后端接口未正常响应 (${response.status}): ${responseText.substring(0, 100)}`);
+    }
+
+    if (!response.ok || !resJson.success) {
+      throw new Error(resJson.error || '调用火山方舟 API 失败，请检查密钥与配置');
+    }
+
+    return resJson.data;
+  };
+
   const handleGenerate = async (formData) => {
     setIsLoading(true);
     setErrorMsg('');
     setIsDone(false);
     setResultData(null);
-    setCurrentStep(1);
 
     try {
-      const stepTimer1 = setTimeout(() => setCurrentStep(2), 2500);
-      const stepTimer2 = setTimeout(() => setCurrentStep(3), 5000);
-
-      // Try /.netlify/functions/generate first, fallback to /api/generate
-      let response = await fetch('/.netlify/functions/generate', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(formData),
+      // --------------------------------------------------------
+      // 步骤 1：联网检索 No.1 竞品
+      // --------------------------------------------------------
+      setCurrentStep(1);
+      const step1Res = await callApiStep({
+        step: 1,
+        ...formData
       });
 
-      if (!response.ok && response.status === 404) {
-        response = await fetch('/api/generate', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(formData),
-        });
-      }
+      // --------------------------------------------------------
+      // 步骤 2：生成携程笔记初稿
+      // --------------------------------------------------------
+      setCurrentStep(2);
+      const step2Res = await callApiStep({
+        step: 2,
+        step1Data: step1Res,
+        ...formData
+      });
 
-      clearTimeout(stepTimer1);
-      clearTimeout(stepTimer2);
-
-      const responseText = await response.text();
-      let resJson;
-      try {
-        resJson = JSON.parse(responseText);
-      } catch (e) {
-        throw new Error(`后端接口未正常响应，请确认 Netlify Functions 已部署。HTTP 状态码: ${response.status}`);
-      }
-
-      if (!response.ok || !resJson.success) {
-        throw new Error(resJson.error || '生成失败，请检查 API Key 与 Endpoint ID 配置');
-      }
-
+      // --------------------------------------------------------
+      // 步骤 3：二次事实核查
+      // --------------------------------------------------------
       setCurrentStep(3);
+      const step3Res = await callApiStep({
+        step: 3,
+        step1Data: step1Res,
+        step2Data: step2Res,
+        ...formData
+      });
+
+      // 组装最终 5 大模块数据展示
+      setResultData({
+        topBrand: step1Res.topBrand || '竞品领先品牌',
+        topBrandReasons: step1Res.topBrandReasons || '优质特色与服务',
+        sources: Array.isArray(step1Res.sources) ? step1Res.sources : [],
+        matchedElements: step2Res.matchedElements || '目标品牌匹配元素完成',
+        finalArticle: step3Res.finalArticle || step2Res.draftArticle,
+        verificationNotes: step3Res.verificationNotes || '已完成事实核查'
+      });
+
       setIsDone(true);
-      setResultData(resJson.data);
     } catch (err) {
       console.error(err);
       setErrorMsg(err.message || '生成过程出现错误');

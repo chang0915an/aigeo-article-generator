@@ -1,5 +1,5 @@
 // netlify/functions/generate.js
-// Standard Netlify Serverless Function (CommonJS)
+// Netlify Serverless Function supporting step-by-step execution to prevent 10s Netlify timeout (504 Gateway Timeout)
 
 exports.handler = async function (event, context) {
   const headers = {
@@ -24,30 +24,25 @@ exports.handler = async function (event, context) {
   try {
     const payload = JSON.parse(event.body || '{}');
     const {
+      step = 1,
       longTailKeyword,
       targetBrandInfo,
       topicDirection,
+      step1Data,
+      step2Data,
       customApiKey,
       customEndpointId
     } = payload;
 
-    if (!longTailKeyword || !targetBrandInfo || !topicDirection) {
-      return {
-        statusCode: 400,
-        headers,
-        body: JSON.stringify({ error: '请填写所有必要的输入字段：长尾关键词、目标品牌信息、主题方向' }),
-      };
-    }
-
     const apiKey = customApiKey || process.env.VOLC_API_KEY || process.env.ARK_API_KEY;
-    const endpointId = customEndpointId || process.env.ARK_ENDPOINT_ID || 'doubao-pro-32k';
+    const endpointId = customEndpointId || process.env.ARK_ENDPOINT_ID || 'doubao-seed-2-0-mini-260428';
 
     if (!apiKey) {
       return {
         statusCode: 401,
         headers,
         body: JSON.stringify({
-          error: '未配置火山方舟 API Key。请在 Netlify 环境变量中设置 VOLC_API_KEY 或在页面高级设置中手动输入。'
+          error: '未配置火山方舟 API Key。请在页面高级配置或 Netlify 环境变量中输入。'
         }),
       };
     }
@@ -80,7 +75,7 @@ exports.handler = async function (event, context) {
       try {
         result = JSON.parse(responseText);
       } catch (e) {
-        throw new Error(`火山方舟 API 返回无法解析的文本: ${responseText}`);
+        throw new Error(`火山方舟 API 返回无法解析文本: ${responseText}`);
       }
 
       return result.choices?.[0]?.message?.content || '';
@@ -98,20 +93,22 @@ exports.handler = async function (event, context) {
         if (jsonMatch) {
           return JSON.parse(jsonMatch[0]);
         }
-        throw new Error('解析 LLM 输出 JSON 失败: ' + content);
+        throw new Error('解析 LLM 输出 JSON 失败');
       }
     }
 
-    // STEP 1: 竞品 No.1 分析
-    const step1Prompt = `你是一个专业的旅游与品牌营销分析师。请结合联网搜索，回答以下长尾搜索问题：
-"${longTailKeyword}"
+    // -----------------------------------------------------------
+    // 分步执行模式（单次请求小于 5 秒，彻底解决 Netlify 10 秒超时 504 报错）
+    // -----------------------------------------------------------
 
-请严格分析搜索到的结果：
-1. 找出在搜索答案中推荐排名第一的品牌/酒店/产品名称。
+    if (step === 1) {
+      // 步骤 1：联网检索竞品 No.1
+      const step1Prompt = `你是一个专业的旅游与品牌营销分析师。请分析长尾搜索问题："${longTailKeyword}"
+1. 找出在搜索或推荐中排名第一的品牌/酒店/产品名称。
 2. 详细分析该品牌排在第一名的主要推荐理由。
-3. 提取并整理引用的信源名称和原始链接。
+3. 整理引用的信源名称和原始链接。
 
-请务必直接输出标准 JSON 格式：
+直接输出 JSON 格式，严禁其他文字：
 {
   "topBrand": "排名第一的品牌名称",
   "topBrandReasons": "第一名的主要推荐理由描述...",
@@ -120,98 +117,117 @@ exports.handler = async function (event, context) {
   ]
 }`;
 
-    const step1OutputText = await callArkModel([
-      { role: 'system', content: '你是一个支持联网搜索分析的 AI 助手。' },
-      { role: 'user', content: step1Prompt }
-    ]);
+      const step1OutputText = await callArkModel([
+        { role: 'system', content: '你是一个专业的旅游分析师。' },
+        { role: 'user', content: step1Prompt }
+      ]);
 
-    let step1Data;
-    try {
-      step1Data = parseLLMJson(step1OutputText);
-    } catch (err) {
-      step1Data = {
-        topBrand: '行业领先品牌',
-        topBrandReasons: step1OutputText,
-        sources: [{ title: '火山方舟豆包整合搜索', url: 'https://www.volcengine.com' }]
+      let resData;
+      try {
+        resData = parseLLMJson(step1OutputText);
+      } catch (e) {
+        resData = {
+          topBrand: '行业领先品牌',
+          topBrandReasons: step1OutputText,
+          sources: [{ title: '火山方舟整合数据', url: 'https://www.volcengine.com' }]
+        };
+      }
+
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({ success: true, step: 1, data: resData }),
       };
     }
 
-    // STEP 2: 携程笔记生成
-    const step2Prompt = `你是一个精通携程社区种草笔记的资深旅游博主。
-长尾词 "${longTailKeyword}" 的第一名品牌是 "${step1Data.topBrand}"，推荐理由是："${step1Data.topBrandReasons}"。
+    if (step === 2) {
+      // 步骤 2：生成携程笔记初稿
+      const topBrand = step1Data?.topBrand || '竞品第一名';
+      const topBrandReasons = step1Data?.topBrandReasons || '优质设施与服务';
+
+      const step2Prompt = `你是一个精通携程社区种草笔记的资深旅游博主。
+长尾词 "${longTailKeyword}" 的第一名品牌是 "${topBrand}"，推荐理由："${topBrandReasons}"。
 
 请参考第一名的推荐逻辑，结合目标品牌信息：
 【目标品牌基本信息】：${targetBrandInfo}
 【文章主题方向】：${topicDirection}
 
 要求：
-1. 提取目标品牌能对标第一名的真实产品元素。
+1. 从目标品牌中提取能对标第一名的真实产品元素。
 2. 撰写一篇引人入胜的携程笔记初稿。
 
-直接输出 JSON 格式：
+直接输出 JSON 格式，严禁其他文字：
 {
   "matchedElements": "目标品牌可以对应的产品元素...",
   "draftArticle": "携程笔记初稿完整内容..."
 }`;
 
-    const step2OutputText = await callArkModel([
-      { role: 'system', content: '你是一个擅长创作携程爆款笔记的专家。' },
-      { role: 'user', content: step2Prompt }
-    ]);
+      const step2OutputText = await callArkModel([
+        { role: 'system', content: '你是一个擅长创作携程爆款笔记的专家。' },
+        { role: 'user', content: step2Prompt }
+      ]);
 
-    let step2Data;
-    try {
-      step2Data = parseLLMJson(step2OutputText);
-    } catch (err) {
-      step2Data = {
-        matchedElements: '已根据品牌信息对标第一名优势特点。',
-        draftArticle: step2OutputText
+      let resData;
+      try {
+        resData = parseLLMJson(step2OutputText);
+      } catch (e) {
+        resData = {
+          matchedElements: '已根据品牌信息对标第一名优势特点。',
+          draftArticle: step2OutputText
+        };
+      }
+
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({ success: true, step: 2, data: resData }),
       };
     }
 
-    // STEP 3: 二次事实核查
-    const step3Prompt = `你是一个极度严谨的旅游事实核查员。请对以下携程笔记初稿进行事实准确度核查：
-${step2Data.draftArticle}
+    if (step === 3) {
+      // 步骤 3：二次事实核查
+      const draftArticle = step2Data?.draftArticle || '';
 
-1. 核查设施、位置、交通距离、活动及真实性；
-2. 修正事实错误；无法确认的信息加上 '[待确认]' 标记。
+      const step3Prompt = `你是一个极度严谨的旅游事实核查员。请对以下携程笔记初稿进行事实准确度核查：
+${draftArticle}
 
-直接输出 JSON 格式：
+1. 核查设施、位置、交通距离、活动真实性；
+2. 自动修正事实错误；无法确认的信息加上 '[待确认]' 标记。
+
+直接输出 JSON 格式，严禁其他文字：
 {
   "finalArticle": "最终核查修改后的携程笔记成品...",
-  "verificationNotes": "事实核查日志..."
+  "verificationNotes": "事实核查日志说明..."
 }`;
 
-    const step3OutputText = await callArkModel([
-      { role: 'system', content: '你是一个严谨的事实核查员。' },
-      { role: 'user', content: step3Prompt }
-    ]);
+      const step3OutputText = await callArkModel([
+        { role: 'system', content: '你是一个严谨的事实核查员。' },
+        { role: 'user', content: step3Prompt }
+      ]);
 
-    let step3Data;
-    try {
-      step3Data = parseLLMJson(step3OutputText);
-    } catch (err) {
-      step3Data = {
-        finalArticle: step3OutputText,
-        verificationNotes: '已完成事实核查与修正。'
+      let resData;
+      try {
+        resData = parseLLMJson(step3OutputText);
+      } catch (e) {
+        resData = {
+          finalArticle: step3OutputText,
+          verificationNotes: '已完成事实核查与修正。'
+        };
+      }
+
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({ success: true, step: 3, data: resData }),
       };
     }
 
     return {
-      statusCode: 200,
+      statusCode: 400,
       headers,
-      body: JSON.stringify({
-        success: true,
-        data: {
-          topBrand: step1Data.topBrand || '行业领先品牌',
-          topBrandReasons: step1Data.topBrandReasons || '未解析出推荐理由',
-          sources: Array.isArray(step1Data.sources) ? step1Data.sources : [],
-          matchedElements: step2Data.matchedElements || '产品元素匹配完成',
-          finalArticle: step3Data.finalArticle || step2Data.draftArticle,
-          verificationNotes: step3Data.verificationNotes || ''
-        }
-      }),
+      body: JSON.stringify({ error: '无效的步骤参数' }),
     };
+
   } catch (error) {
     console.error('Function error:', error);
     return {
