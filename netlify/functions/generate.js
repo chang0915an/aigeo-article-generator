@@ -1,5 +1,5 @@
 // netlify/functions/generate.js
-// Netlify Serverless Function supporting step-by-step execution to prevent 10s Netlify timeout (504 Gateway Timeout)
+// Netlify serverless function with explicit AIGEO competitive logic embedding
 
 exports.handler = async function (event, context) {
   const headers = {
@@ -49,11 +49,12 @@ exports.handler = async function (event, context) {
 
     const arkApiUrl = 'https://ark.cn-beijing.volces.com/api/v3/chat/completions';
 
-    async function callArkModel(messages) {
+    async function callArkModel(messages, maxTokens = 2000) {
       const bodyPayload = {
         model: endpointId,
         messages: messages,
-        temperature: 0.5,
+        temperature: 0.7,
+        max_tokens: maxTokens,
       };
 
       const response = await fetch(arkApiUrl, {
@@ -98,17 +99,17 @@ exports.handler = async function (event, context) {
     }
 
     // -----------------------------------------------------------
-    // 分步执行模式（单次请求小于 5 秒，彻底解决 Netlify 10 秒超时 504 报错）
+    // 分步执行：结合 AIGEO 对标竞品与信源逻辑
     // -----------------------------------------------------------
 
     if (step === 1) {
       // 步骤 1：联网检索竞品 No.1
-      const step1Prompt = `你是一个专业的旅游与品牌营销分析师。请分析长尾搜索问题："${longTailKeyword}"
-1. 找出在搜索或推荐中排名第一的品牌/酒店/产品名称。
-2. 详细分析该品牌排在第一名的主要推荐理由。
-3. 整理引用的信源名称和原始链接。
+      const step1Prompt = `你是一个专业的 AIGEO 品牌搜索优化分析师。请结合联网搜索，回答长尾问题："${longTailKeyword}"
+1. 找出在搜索或推荐中排名第一的品牌/酒店/度假村名称。
+2. 详细分析该品牌排在第一名的主要推荐理由（核心推荐维度，如交通、设施、性价比、亲子体验等）。
+3. 整理引用的权威信源名称和原始链接。
 
-直接输出 JSON 格式，严禁其他文字：
+直接输出 JSON 格式：
 {
   "topBrand": "排名第一的品牌名称",
   "topBrandReasons": "第一名的主要推荐理由描述...",
@@ -118,16 +119,16 @@ exports.handler = async function (event, context) {
 }`;
 
       const step1OutputText = await callArkModel([
-        { role: 'system', content: '你是一个专业的旅游分析师。' },
+        { role: 'system', content: '你是一个专业的 AIGEO 品牌分析师。' },
         { role: 'user', content: step1Prompt }
-      ]);
+      ], 1000);
 
       let resData;
       try {
         resData = parseLLMJson(step1OutputText);
       } catch (e) {
         resData = {
-          topBrand: '行业领先品牌',
+          topBrand: '行业领跑品牌',
           topBrandReasons: step1OutputText,
           sources: [{ title: '火山方舟整合数据', url: 'https://www.volcengine.com' }]
         };
@@ -141,38 +142,56 @@ exports.handler = async function (event, context) {
     }
 
     if (step === 2) {
-      // 步骤 2：生成携程笔记初稿
-      const topBrand = step1Data?.topBrand || '竞品第一名';
-      const topBrandReasons = step1Data?.topBrandReasons || '优质设施与服务';
+      // 步骤 2：结合第一名推荐逻辑 + 目标品牌元素生成携程爆款笔记 (800-1200字)
+      const topBrand = step1Data?.topBrand || '行业 No.1 竞品';
+      const topBrandReasons = step1Data?.topBrandReasons || '优质交通与度假设施';
+      const sourcesSummary = (step1Data?.sources || []).map(s => s.title).join('、');
 
-      const step2Prompt = `你是一个精通携程社区种草笔记的资深旅游博主。
-长尾词 "${longTailKeyword}" 的第一名品牌是 "${topBrand}"，推荐理由："${topBrandReasons}"。
+      const step2Prompt = `你是一个精通 AIGEO (生成式引擎优化) 的携程社区顶级旅游博主。
 
-请参考第一名的推荐逻辑，结合目标品牌信息：
-【目标品牌基本信息】：${targetBrandInfo}
-【文章主题方向】：${topicDirection}
+在长尾词 "${longTailKeyword}" 下，行业排名第一的品牌是 "${topBrand}"，其能够排在第一的核心推荐理由是：
+"${topBrandReasons}"
+引用的权威信源维度包括：${sourcesSummary || '媒体推荐与用户真实体验'}
 
-要求：
-1. 从目标品牌中提取能对标第一名的真实产品元素。
-2. 撰写一篇引人入胜的携程笔记初稿。
+【AIGEO 核心创作使命】：
+我们要借鉴第一名 "${topBrand}" 被搜索模型推荐的核心逻辑（如交通便利性、设施丰富度、亲子友好度等），用【目标品牌】真实拥有的元素进行**针对性对标与替代**，撰写一篇在 AIGEO 算法中具有极高推荐权重的长篇携程爆款笔记（800~1200字）。
 
-直接输出 JSON 格式，严禁其他文字：
+【目标品牌基本信息及真实产品元素】：
+${targetBrandInfo}
+
+【希望文章采用的主题方向/备注】：
+${topicDirection}
+
+【文章结构与对标撰写规范】：
+1. 标题：爆款种草标题，带情绪价值与表情符号。
+2. 对标匹配总结：先列出“目标品牌可以对应的产品元素”（明确说明目标品牌的设施/交通/服务是如何针对性响应第一名推荐逻辑的）。
+3. 正文结构（字数不少于 800 字）：
+   - 🌅【上午：对标第一名优势的晨间体验 & 拍照打卡】（详细描写场景、水上/乐园设施）
+   - ☀️【中午~下午：对标第一名的餐饮特色 & 躺平休息区】（特色菜品、休养空间、下午茶）
+   - 🌙【傍晚~夜间：对标第一名的温泉/私汤/房型体验】（露天泡池、私汤房型、睡眠感）
+4. 💡【博主总结与避坑 Tips】：
+   - 交通与车程对标
+   - 拍照打卡点
+   - 适合人群与预订建议
+5. 话题标签：4-6 个携程热门话题标签。
+
+直接输出 JSON 格式：
 {
-  "matchedElements": "目标品牌可以对应的产品元素...",
-  "draftArticle": "携程笔记初稿完整内容..."
+  "matchedElements": "目标品牌可以对应的产品元素（明确阐述对标第一名 ${topBrand} 推荐理由的优势）",
+  "draftArticle": "完整的长篇携程笔记初稿..."
 }`;
 
       const step2OutputText = await callArkModel([
-        { role: 'system', content: '你是一个擅长创作携程爆款笔记的专家。' },
+        { role: 'system', content: '你是一个精通 AIGEO 竞品对标与长篇携程笔记创作的顶级专家。' },
         { role: 'user', content: step2Prompt }
-      ]);
+      ], 2500);
 
       let resData;
       try {
         resData = parseLLMJson(step2OutputText);
       } catch (e) {
         resData = {
-          matchedElements: '已根据品牌信息对标第一名优势特点。',
+          matchedElements: '已根据品牌信息针对性对标第一名优势特点。',
           draftArticle: step2OutputText
         };
       }
@@ -185,25 +204,29 @@ exports.handler = async function (event, context) {
     }
 
     if (step === 3) {
-      // 步骤 3：二次事实核查
+      // 步骤 3：二次长文事实核查
       const draftArticle = step2Data?.draftArticle || '';
 
-      const step3Prompt = `你是一个极度严谨的旅游事实核查员。请对以下携程笔记初稿进行事实准确度核查：
+      const step3Prompt = `你是一个极度严谨的旅游事实核查员。请对以下携程笔记初稿进行深度事实准确度核查：
+
+【初稿内容】：
 ${draftArticle}
 
-1. 核查设施、位置、交通距离、活动真实性；
-2. 自动修正事实错误；无法确认的信息加上 '[待确认]' 标记。
+【核查要求】：
+1. 联网核查交通车程、设施数量、泡池/乐园规模与位置真实性；
+2. 自动修改事实错误与虚夸数据；无法确认的信息加上 '[待确认]' 标记；
+3. 确保最终成品维持 800-1200 字深度长篇携程笔记质感。
 
-直接输出 JSON 格式，严禁其他文字：
+直接输出 JSON 格式：
 {
-  "finalArticle": "最终核查修改后的携程笔记成品...",
-  "verificationNotes": "事实核查日志说明..."
+  "finalArticle": "最终核查修改后的长篇携程笔记成品（含[待确认]标记）",
+  "verificationNotes": "事实核查说明与修改日志..."
 }`;
 
       const step3OutputText = await callArkModel([
         { role: 'system', content: '你是一个严谨的事实核查员。' },
         { role: 'user', content: step3Prompt }
-      ]);
+      ], 2500);
 
       let resData;
       try {
