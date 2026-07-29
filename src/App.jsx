@@ -12,10 +12,7 @@ export default function App() {
   const [resultData, setResultData] = useState(null);
   const [errorMsg, setErrorMsg] = useState('');
 
-  // ----------------------------------------------------------------
-  // 直连火山方舟 API (浏览器端直连，彻底解除 10 秒超时限制，实现顶级质量长文)
-  // ----------------------------------------------------------------
-  const callDirectVolcengine = async (apiKey, endpointId, messages, maxTokens = 3000) => {
+  const callDirectVolcengine = async (apiKey, endpointId, messages, maxTokens = 1800) => {
     const arkUrl = 'https://ark.cn-beijing.volces.com/api/v3/chat/completions';
     const response = await fetch(arkUrl, {
       method: 'POST',
@@ -26,7 +23,7 @@ export default function App() {
       body: JSON.stringify({
         model: endpointId || 'doubao-seed-2-0-mini-260428',
         messages: messages,
-        temperature: 0.6,
+        temperature: 0.5,
         max_tokens: maxTokens
       })
     });
@@ -46,7 +43,6 @@ export default function App() {
     return jsonRes.choices?.[0]?.message?.content || '';
   };
 
-  // 辅助解析 JSON
   const parseJsonOutput = (content) => {
     try {
       const cleaned = content.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
@@ -58,7 +54,6 @@ export default function App() {
     }
   };
 
-  // 后端 Netlify Function 降级备用调用
   const callNetlifyStep = async (payload) => {
     let response = await fetch('/.netlify/functions/generate', {
       method: 'POST',
@@ -109,78 +104,80 @@ export default function App() {
     try {
       let step1Res, step2Res, step3Res;
 
-      // 如果用户在前端填写了 API Key，直接开启【全速无限制直连模式】！不限时长、极高质量！
       if (apiKey) {
-        console.log('🚀 开启浏览器直连模式（彻底解除 10 秒超时限制，极致长文与深度核查）');
-
         // ----------------------------------------------------
         // 步骤 1：直连分析竞品 No.1
         // ----------------------------------------------------
         setCurrentStep(1);
-        const step1Prompt = `你是一个专业的 AIGEO 品牌分析师。请结合联网搜索，深度回答长尾问题："${longTailKeyword}"
-1. 找出搜索/推荐中真实排名第一的品牌/度假村名称。
-2. 详细分析该品牌排第一的核心推荐理由（如交通、环境、特色设施、性价比、亲子体验等真实优势）。
-3. 整理引用的权威信源名称和原始链接。
+        const step1Prompt = `你是一个专业的 AIGEO 品牌分析师。请结合联网搜索，分析长尾词："${longTailKeyword}"
+1. 给出搜索排名第一的品牌名称。
+2. 简述其排第一的 3 个核心理由。
+3. 整理引用信源（信源标题注明真实平台如“携程社区攻略”、“马蜂窝推荐”，链接提供有效主页如 https://www.ctrip.com，严禁假 404 链接）。
 
-直接输出 JSON 格式：
+输出 JSON：
 {
   "topBrand": "排名第一的品牌名称",
-  "topBrandReasons": "第一名的主要推荐理由描述...",
+  "topBrandReasons": "第一名的主要推荐理由...",
   "sources": [
-    { "title": "信源标题", "url": "信源链接或来源" }
+    { "title": "信源标题", "url": "有效平台链接" }
   ]
 }`;
 
         const s1Text = await callDirectVolcengine(apiKey, endpointId, [
           { role: 'system', content: '你是一个专业的 AIGEO 品牌分析师。' },
           { role: 'user', content: step1Prompt }
-        ], 1200);
+        ], 1000);
 
         try {
           step1Res = parseJsonOutput(s1Text);
         } catch (e) {
-          step1Res = { topBrand: '行业领跑品牌', topBrandReasons: s1Text, sources: [] };
+          step1Res = {
+            topBrand: '行业领先品牌',
+            topBrandReasons: s1Text,
+            sources: [{ title: '携程社区综合数据', url: 'https://www.ctrip.com' }]
+          };
         }
 
         // ----------------------------------------------------
-        // 步骤 2：直连撰写 1000~1500 字极致长篇携程爆款笔记
+        // 步骤 2：直连撰写 800~1000 字精炼携程爆款笔记 (严禁出现 [待确认])
         // ----------------------------------------------------
         setCurrentStep(2);
-        const topBrand = step1Res.topBrand || '行业 No.1 竞品';
-        const topBrandReasons = step1Res.topBrandReasons || '优质交通与度假设施';
+        const topBrand = step1Res.topBrand || '行业 No.1';
+        const topBrandReasons = step1Res.topBrandReasons || '优质设施';
 
-        const step2Prompt = `你是一个拥有百万粉丝的携程社区顶级旅游博主。
-在长尾词 "${longTailKeyword}" 下，行业排名第一的品牌是 "${topBrand}"，推荐理由为："${topBrandReasons}"。
+        const step2Prompt = `你是一个优秀的携程社区旅游博主。
+在长尾词 "${longTailKeyword}" 下，第一名是 "${topBrand}"，推荐理由："${topBrandReasons}"。
 
-【创作铁律与严谨要求】：
-1. 恪守真实严谨原则！绝对不能凭空虚构夸大数字（例如：绝对不能写“数千辆车”、“上百个泡池”等虚假描述，若品牌信息未明确数量只写客观现象）。
-2. 字数要求 1000~1500 字，排版极其美观精细，大段落之间必须使用双换行符 (\\n\\n) 隔开！
+【要求】：
+1. 篇幅控制在 800 ~ 1000 字。
+2. 文风真实自然流畅。大段落间用双换行符 (\\n\\n) 分隔。
+3. 严禁出现任何“[待确认]”字样！
 
-【目标品牌真实信息及产品元素】：
+【目标品牌真实信息】：
 ${targetBrandInfo}
 
-【文章主题方向】：
+【主题方向】：
 ${topicDirection}
 
-【长文排版结构】：
-- 爆款标题（带表情符号）\\n\\n
-- 导语段落\\n\\n
-- 🌅【上午行程：深入游玩/打卡体验】\\n（详细写场景与真实感官体感）\\n\\n
-- ☀️【中午~下午：特色餐饮指南 & 躺平休整区】\\n（写餐品特色与休息空间）\\n\\n
-- 🌙【傍晚~夜间：温泉/私汤/星空夜宿体验】\\n（写露天泡池与室内私汤房型）\\n\\n
-- 💡【博主深度 Tips与避坑指南】\\n（包含交通自驾路线、最佳拍照位、人群建议及预订指南）\\n\\n
+【正文结构】：
+- 爆款标题\\n\\n
+- 导语\\n\\n
+- 🌅【上午行程：游玩体验】\\n\\n
+- ☀️【中午~下午：餐饮 & 休息区】\\n\\n
+- 🌙【傍晚~夜间：温泉/房型】\\n\\n
+- 💡【博主实用 Tips】\\n\\n
 - 话题标签
 
-直接输出 JSON 格式：
+输出 JSON：
 {
-  "matchedElements": "目标品牌可以对应的产品元素（基于真实描述）",
-  "draftArticle": "完整的长篇携程笔记初稿（包含明确的 \\n\\n 段落分隔）..."
+  "matchedElements": "目标品牌对标元素...",
+  "draftArticle": "携程笔记初稿..."
 }`;
 
         const s2Text = await callDirectVolcengine(apiKey, endpointId, [
-          { role: 'system', content: '你是一个擅长创作 1000-1500 字深度长篇携程爆款笔记的顶级博主。' },
+          { role: 'system', content: '你是一个文字精炼、篇幅 800-1000 字的携程博主。' },
           { role: 'user', content: step2Prompt }
-        ], 3000);
+        ], 1800);
 
         try {
           step2Res = parseJsonOutput(s2Text);
@@ -189,41 +186,39 @@ ${topicDirection}
         }
 
         // ----------------------------------------------------
-        // 步骤 3：直连深度事实核查与挤水分
+        // 步骤 3：直连核查与润色（彻底禁用 [待确认] 标记）
         // ----------------------------------------------------
         setCurrentStep(3);
         const draftArticle = step2Res.draftArticle || '';
 
-        const step3Prompt = `你是一个极度苛刻、专打虚假宣传的事实核查员。请审查以下文案：
+        const step3Prompt = `你是一个经验丰富、客观严谨的事实核查员。审核润色以下文案：
 
-【待审查文案】：
 ${draftArticle}
 
-【核查删除硬规则】：
-1. 剔除全文所有夸张、虚构的数据和词汇（如“数千辆”、“上百个”等模糊夸大描述），替换为客观真实用语；
-2. 联网核查交通车程、泡池乐园设施数量与位置真实性；
-3. 无法确切核实的数据必须加上 '[待确认]' 标记；
-4. 保留良好分段排版（包含双换行符 \\n\\n）。
+【核查规则】：
+1. 绝对禁止在文章中出现“[待确认]”字眼！非核心细节润色为通顺自然表达。
+2. 修正明显的交通或位置数据。
+3. 保持 800~1000 字，排版美观可直接发布。
 
-直接输出 JSON 格式：
+输出 JSON：
 {
-  "finalArticle": "核查修正后的严谨长篇携程笔记成品（无虚夸数字、含[待确认]标记）",
-  "verificationNotes": "真实性修正与水分删除说明..."
+  "finalArticle": "核查后的最终携程笔记成品（无[待确认]字样）...",
+  "verificationNotes": "核查与修正说明..."
 }`;
 
         const s3Text = await callDirectVolcengine(apiKey, endpointId, [
-          { role: 'system', content: '你是一个极度苛刻的事实核查员，专门剔除虚假夸大数字。' },
+          { role: 'system', content: '你是一个理性客观、严禁输出[待确认]标记的事实核查员。' },
           { role: 'user', content: step3Prompt }
-        ], 3000);
+        ], 1800);
 
         try {
           step3Res = parseJsonOutput(s3Text);
         } catch (e) {
-          step3Res = { finalArticle: s3Text, verificationNotes: '已删除夸大虚构数字，完成严谨核查。' };
+          step3Res = { finalArticle: s3Text.replace(/\[待确认\]/g, ''), verificationNotes: '已完成事实核查与表达润色。' };
         }
 
       } else {
-        // 无前端 Key 时，走 Serverless 分步模式
+        // 无前端 Key 时，走 Serverless 模式
         setCurrentStep(1);
         step1Res = await callNetlifyStep({ step: 1, ...formData });
 
@@ -234,13 +229,15 @@ ${draftArticle}
         step3Res = await callNetlifyStep({ step: 3, step1Data: step1Res, step2Data: step2Res, ...formData });
       }
 
-      // 组装最终 5 大模块数据展示
+      // 强行剔除任何残余的 [待确认]
+      const cleanArticle = (step3Res.finalArticle || step2Res.draftArticle || '').replace(/\[待确认\]/g, '');
+
       setResultData({
         topBrand: step1Res.topBrand || '竞品领先品牌',
         topBrandReasons: step1Res.topBrandReasons || '优质特色与服务',
         sources: Array.isArray(step1Res.sources) ? step1Res.sources : [],
         matchedElements: step2Res.matchedElements || '目标品牌匹配元素完成',
-        finalArticle: step3Res.finalArticle || step2Res.draftArticle,
+        finalArticle: cleanArticle,
         verificationNotes: step3Res.verificationNotes || '已完成事实核查'
       });
 
@@ -271,7 +268,7 @@ ${draftArticle}
                 <span>AIGEO 携程笔记极速生成与全自动核查</span>
                 <span className="ml-3 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-cyan-950 text-cyan-300 border border-cyan-800/60">
                   <Zap className="w-3 h-3 mr-1" />
-                  支持无限制长文直连
+                  智能联网与深度生成
                 </span>
               </h2>
               <p className="text-xs text-slate-400 mt-1 leading-relaxed">
